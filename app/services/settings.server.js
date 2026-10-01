@@ -51,3 +51,28 @@ export async function recordRun(shop, type, itemCount, totalBytes = 0) {
     update: data,
   });
 }
+
+export const IMPORT_BOOLEANS = [
+  "replaceExisting",
+  "importFiles",
+  "importProductMedia",
+  "importBlogPosts",
+  "importPages",
+  "importMenus",
+];
+
+export async function getImportSettings(shop) {
+  const row = await db.importSettings.findUnique({ where: { shop } });
+  return row ?? (await db.importSettings.create({ data: { shop } }));
+}
+
+export async function saveImportSettings(shop, form) {
+  const data = Object.fromEntries(
+    IMPORT_BOOLEANS.map((key) => [key, form.get(key) === "true"]),
+  );
+  return db.importSettings.upsert({
+    where: { shop },
+    create: { shop, ...data },
+    update: data,
+  });
+}
