@@ -5,6 +5,9 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { useExport } from "../lib/exporter/useExport.js";
+import { getPlan } from "../services/plan.server";
+import { useUpgrade } from "../components/PlanBanner.jsx";
+import { PRO_PRICE_AMOUNT, PRO_TRIAL_DAYS } from "../services/plan-info.js";
 import {
   getExportSettings,
   getLastRuns,
@@ -12,12 +15,13 @@ import {
 } from "../services/settings.server";
 
 export const loader = async ({ request }) => {
-  const { session } = await authenticate.admin(request);
-  const [settings, lastRuns] = await Promise.all([
+  const { session, billing } = await authenticate.admin(request);
+  const [settings, lastRuns, plan] = await Promise.all([
     getExportSettings(session.shop),
     getLastRuns(session.shop),
+    getPlan(billing, session.shop),
   ]);
-  return { settings, lastRuns, shop: session.shop };
+  return { settings, lastRuns, shop: session.shop, isPro: plan.isPro };
 };
 
 export const action = async ({ request }) => {
@@ -219,7 +223,8 @@ function ExportStatus({ exporter }) {
 }
 
 export default function Index() {
-  const { settings, lastRuns, shop } = useLoaderData();
+  const { settings, lastRuns, shop, isPro } = useLoaderData();
+  const plan = useUpgrade();
   const metrics = useMetrics();
   const shopify = useAppBridge();
   const fetcher = useFetcher();
@@ -312,6 +317,40 @@ export default function Index() {
             </s-text>
           )}
           <ExportStatus exporter={exporter} />
+        </s-stack>
+      </s-section>
+
+      <s-section heading="Your plan">
+        <s-stack gap="small-200">
+          <s-stack direction="inline" gap="small-200" alignItems="center">
+            <s-badge tone={isPro ? "success" : "neutral"}>
+              {isPro ? "Pro" : "Free"}
+            </s-badge>
+            <s-text>
+              {isPro
+                ? "Export and import are enabled."
+                : `Exporting is included. Import is available on Pro: $${PRO_PRICE_AMOUNT}/month with a ${PRO_TRIAL_DAYS}-day free trial.`}
+            </s-text>
+          </s-stack>
+          <s-stack direction="inline">
+            {isPro ? (
+              <s-button
+                tone="critical"
+                onClick={plan.cancel}
+                {...(plan.busy ? { loading: true } : {})}
+              >
+                Cancel Pro
+              </s-button>
+            ) : (
+              <s-button
+                variant="primary"
+                onClick={plan.upgrade}
+                {...(plan.busy ? { loading: true } : {})}
+              >
+                Go Pro
+              </s-button>
+            )}
+          </s-stack>
         </s-stack>
       </s-section>
 

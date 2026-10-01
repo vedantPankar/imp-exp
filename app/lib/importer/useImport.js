@@ -14,6 +14,7 @@ async function api(intent, payload, signal) {
   if (!response.ok) {
     throw Object.assign(new Error(json.error || `HTTP ${response.status}`), {
       retriable: response.status === 429 || response.status >= 500,
+      planRequired: response.status === 402,
     });
   }
   return json;

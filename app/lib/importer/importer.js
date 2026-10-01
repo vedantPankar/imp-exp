@@ -86,7 +86,8 @@ export async function runImport({
   const state = { phase: "reading", done: 0, total: 0, current: "" };
   const emit = () =>
     onProgress?.({ ...state, summary, errorCount: errors.length });
-  const cancelled = () => signal?.aborted;
+  let fatal = null; // e.g. plan no longer allows importing: stop everything
+  const cancelled = () => signal?.aborted || fatal !== null;
 
   // --- read manifests ---
   const items = Object.fromEntries(TYPES.map((t) => [t, []]));
@@ -157,6 +158,7 @@ export async function runImport({
           });
         return res;
       } catch (error) {
+        if (error.planRequired) fatal = error;
         if (cancelled() || attempt >= 2 || error.retriable === false)
           throw error;
         await new Promise((r) => setTimeout(r, 400 * 2 ** attempt));
@@ -378,6 +380,7 @@ export async function runImport({
   await contentBatches("pages", "Pages", "pages", passthrough);
   await contentBatches("menus", "Menus", "menus", passthrough);
 
+  if (fatal) throw fatal;
   state.phase = cancelled() ? "cancelled" : "done";
   emit();
   return { status: state.phase, summary, errors, warnings };
