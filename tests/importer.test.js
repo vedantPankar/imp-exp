@@ -222,7 +222,8 @@ test("article payload carries the staged featured image and menu keeps resource 
   });
   const article = s.calls.find((c) => c.intent === "articles").payload.items[0];
   assert.equal(article.blogHandle, "news");
-  assert.match(article.imageUrl, /^staged:\/\//);
+  assert.match(article.imageResourceUrl, /^staged:\/\//);
+  assert.equal(article.imageFilename, "hello-hero.png");
   assert.equal(article.imageAlt, "Hero");
   const menu = s.calls.find((c) => c.intent === "menus").payload.items[0];
   assert.equal(menu.items[0].resourceHandle, "about");

@@ -7,10 +7,10 @@ embedded = true
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_files,write_files,read_products,write_products,read_content,write_content,read_online_store_navigation,write_online_store_navigation"
+scopes = "read_files,write_files,read_products,write_products,read_content,write_content,read_online_store_navigation,write_online_store_navigation,read_online_store_pages,write_online_store_pages"
 
 [webhooks]
-api_version = "2026-10"
+api_version = "2026-07"
 
   [[webhooks.subscriptions]]
   uri = "/webhooks/app/uninstalled"

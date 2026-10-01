@@ -1,4 +1,4 @@
-import { adminGraphql } from "./shopifyAdmin.server";
+import { adminGraphql } from "./shopifyAdmin.server.js";
 
 const HANDLE = /^[\w-]+$/; // handles go into search queries, so only accept plain ones
 
@@ -279,6 +279,83 @@ export function upsertBlogs(admin, blogs) {
   });
 }
 
+// Article images can't take a staged upload URL directly. Each image is first turned into a
+// real file with fileCreate, then we wait for it to become READY and use its CDN URL.
+export async function prepareArticleImages(
+  admin,
+  articles,
+  {
+    maxAttempts = 20,
+    delayMs = 1500,
+    sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+  } = {},
+) {
+  const withImage = articles.filter((a) => a.imageResourceUrl);
+  const outcome = new Map(); // article -> { url } | { warning }
+  if (withImage.length === 0) return outcome;
+
+  const created = await adminGraphql(
+    admin,
+    `#graphql
+    mutation CreateArticleImages($files: [FileCreateInput!]!) {
+      fileCreate(files: $files) {
+        files { id fileStatus }
+        userErrors { field message code }
+      }
+    }`,
+    {
+      files: withImage.map((a) => ({
+        originalSource: a.imageResourceUrl,
+        filename: a.imageFilename || undefined,
+        alt: a.imageAlt ?? "",
+        contentType: "IMAGE",
+        // never replace an existing file; a same-named image gets a unique suffix instead
+        duplicateResolutionMode: "APPEND_UUID",
+      })),
+    },
+  );
+  const { files, userErrors } = created.fileCreate;
+  if (userErrors.length || files.length !== withImage.length) {
+    const warning = `Featured image not imported: ${errorText(userErrors) || "file could not be created"}`;
+    withImage.forEach((a) => outcome.set(a, { warning }));
+    return outcome;
+  }
+
+  const pending = new Map(withImage.map((a, i) => [files[i].id, a]));
+  for (let attempt = 0; pending.size > 0 && attempt < maxAttempts; attempt++) {
+    if (attempt > 0) await sleep(delayMs);
+    const data = await adminGraphql(
+      admin,
+      `#graphql
+      query ArticleImageStatus($ids: [ID!]!) {
+        nodes(ids: $ids) { id ... on MediaImage { fileStatus image { url } } }
+      }`,
+      { ids: [...pending.keys()] },
+    );
+    for (const node of data.nodes) {
+      if (!node || !pending.has(node.id)) continue;
+      const article = pending.get(node.id);
+      if (node.fileStatus === "READY" && node.image?.url) {
+        outcome.set(article, { url: node.image.url });
+        pending.delete(node.id);
+      } else if (node.fileStatus === "FAILED") {
+        outcome.set(article, {
+          warning:
+            "Featured image not imported: Shopify could not process the image",
+        });
+        pending.delete(node.id);
+      }
+    }
+  }
+  for (const article of pending.values()) {
+    outcome.set(article, {
+      warning:
+        "Featured image not imported: it was still processing after waiting; add it manually",
+    });
+  }
+  return outcome;
+}
+
 export async function upsertArticles(admin, articles) {
   const blogIds = new Map(); // one blog lookup per handle per request
   const blogId = async (handle) => {
@@ -287,7 +364,10 @@ export async function upsertArticles(admin, articles) {
     return blogIds.get(handle);
   };
 
+  const images = await prepareArticleImages(admin, articles);
+
   return run(articles, async (a) => {
+    const image = images.get(a);
     const id = await blogId(a.blogHandle);
     if (!id)
       return {
@@ -312,8 +392,8 @@ export async function upsertArticles(admin, articles) {
       tags: a.tags ?? [],
       templateSuffix: a.templateSuffix ?? null,
       ...published(a),
-      ...(a.imageUrl
-        ? { image: { url: a.imageUrl, altText: a.imageAlt ?? "" } }
+      ...(image?.url
+        ? { image: { url: image.url, altText: a.imageAlt ?? "" } }
         : {}),
     };
     const data = existing
@@ -336,7 +416,10 @@ export async function upsertArticles(admin, articles) {
     const { userErrors } = data.articleUpdate ?? data.articleCreate;
     if (userErrors.length)
       return { status: "failed", error: errorText(userErrors) };
-    return { status: existing ? "updated" : "created" };
+    return {
+      status: existing ? "updated" : "created",
+      warnings: image?.warning ? [image.warning] : [],
+    };
   });
 }
 

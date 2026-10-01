@@ -372,7 +372,8 @@ export async function runImport({
     });
     return batch.map((a) => ({
       ...a,
-      imageUrl: urlByArticle.get(a) ?? null,
+      imageResourceUrl: urlByArticle.get(a) ?? null,
+      imageFilename: a.image?.path ? baseName(a.image.path) : null,
       imageAlt: a.image?.alt ?? "",
     }));
   });
