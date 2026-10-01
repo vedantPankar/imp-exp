@@ -1,0 +1,69 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
+// enough when changing adapters.
+// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
+datasource db {
+  provider = "sqlite"
+  url      = "file:dev.sqlite"
+}
+
+model Session {
+  id            String    @id
+  shop          String
+  state         String
+  isOnline      Boolean   @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt?
+  firstName     String?
+  lastName      String?
+  email         String?
+  accountOwner  Boolean   @default(false)
+  locale        String?
+  collaborator  Boolean?  @default(false)
+  emailVerified Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+}
+
+model ExportSettings {
+  shop                String   @id
+  includeFiles        Boolean  @default(true)
+  includeProductMedia Boolean  @default(true)
+  includeBlogPosts    Boolean  @default(true)
+  includePages        Boolean  @default(true)
+  includeMenus        Boolean  @default(true)
+  maxPartSizeMb       Int      @default(500)
+  keepOriginalNames   Boolean  @default(true)
+  updatedAt           DateTime @updatedAt
+}
+
+model ImportSettings {
+  shop                String   @id
+  replaceExisting     Boolean  @default(false)
+  importFiles         Boolean  @default(true)
+  importProductMedia  Boolean  @default(true)
+  importBlogPosts     Boolean  @default(true)
+  importPages         Boolean  @default(true)
+  importMenus         Boolean  @default(true)
+  updatedAt           DateTime @updatedAt
+}
+
+// One row per shop and run type ("files", "articles", ...); upserted on each export/import.
+model ExportRun {
+  id         String   @id @default(cuid())
+  shop       String
+  type       String
+  itemCount  Int      @default(0)
+  totalBytes BigInt   @default(0)
+  lastRunAt  DateTime @default(now())
+
+  @@unique([shop, type])
+}
