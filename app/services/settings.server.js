@@ -22,7 +22,7 @@ export async function saveExportSettings(shop, form) {
   // Clamp to a sane range so a typo can't produce a 0-byte or multi-TB part
   data.maxPartSizeMb = Number.isFinite(size)
     ? Math.min(Math.max(size, 50), 4000)
-    : 500;
+    : 200;
   return db.exportSettings.upsert({
     where: { shop },
     create: { shop, ...data },

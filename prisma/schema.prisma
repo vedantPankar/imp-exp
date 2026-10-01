@@ -40,7 +40,7 @@ model ExportSettings {
   includeBlogPosts    Boolean  @default(true)
   includePages        Boolean  @default(true)
   includeMenus        Boolean  @default(true)
-  maxPartSizeMb       Int      @default(500)
+  maxPartSizeMb       Int      @default(200)
   keepOriginalNames   Boolean  @default(true)
   updatedAt           DateTime @updatedAt
 }
