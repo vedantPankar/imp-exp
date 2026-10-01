@@ -1,9 +1,10 @@
 /* eslint-disable react/prop-types */
-import { useEffect, useRef, useState } from "react";
-import { useFetcher, useLoaderData } from "react-router";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useFetcher, useLoaderData, useRevalidator } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
+import { useFileExport } from "../lib/exporter/useFileExport.js";
 import {
   getExportSettings,
   getLastRuns,
@@ -16,7 +17,7 @@ export const loader = async ({ request }) => {
     getExportSettings(session.shop),
     getLastRuns(session.shop),
   ]);
-  return { settings, lastRuns };
+  return { settings, lastRuns, shop: session.shop };
 };
 
 export const action = async ({ request }) => {
@@ -34,7 +35,11 @@ const CARDS = [
   { key: "blogs", label: "Blogs", runType: "blogs" },
   { key: "pages", label: "Pages", runType: "pages" },
   { key: "menus", label: "Menus", runType: "menus" },
-  { key: "productMedia", label: "Products with media", runType: "productMedia" },
+  {
+    key: "productMedia",
+    label: "Products with media",
+    runType: "productMedia",
+  },
 ];
 
 const SETTING_TOGGLES = [
@@ -137,14 +142,100 @@ function MetricCard({ card, metric, lastRun }) {
   );
 }
 
+function ExportStatus({ exporter }) {
+  const { state } = exporter;
+  const p = state.progress;
+  if (state.status === "idle") return null;
+
+  return (
+    <s-stack gap="small-200">
+      {state.status === "running" && p?.phase === "listing" && (
+        <s-text>Listing files… {p.listed.toLocaleString()} found</s-text>
+      )}
+      {state.status === "running" && p?.total !== undefined && (
+        <>
+          <s-progress
+            accessibilityLabel="Export progress"
+            value={p.total ? Math.round((p.done / p.total) * 100) : 0}
+            max="100"
+          />
+          <s-text>
+            {p.done.toLocaleString()} of {p.total.toLocaleString()} files · part{" "}
+            {p.part} · {formatBytes(p.bytes)}
+            {p.failed ? ` · ${p.failed} failed` : ""}
+          </s-text>
+        </>
+      )}
+      {state.status === "completed" && (
+        <s-banner
+          tone={state.failed.length ? "warning" : "success"}
+          heading={
+            state.failed.length
+              ? "Export finished with errors"
+              : "Export complete"
+          }
+        >
+          {state.exported.toLocaleString()} files saved in {state.parts} ZIP{" "}
+          {state.parts === 1 ? "part" : "parts"}.
+          {state.failed.length > 0 &&
+            ` ${state.failed.length} could not be downloaded, so this run was not recorded as a complete export.`}
+        </s-banner>
+      )}
+      {state.status === "empty" && (
+        <s-banner tone="info">There are no files to export.</s-banner>
+      )}
+      {state.status === "cancelled" && (
+        <s-banner tone="warning" heading="Export cancelled">
+          {state.parts
+            ? `${state.parts} ZIP part(s) were already downloaded.`
+            : "Nothing was downloaded."}
+        </s-banner>
+      )}
+      {state.status === "error" && (
+        <s-banner tone="critical" heading="Export failed">
+          {state.error}
+        </s-banner>
+      )}
+      {state.failed.length > 0 && (
+        <s-stack gap="small-300">
+          <s-text type="strong">Failed files</s-text>
+          <s-box maxBlockSize="200px" overflow="auto">
+            <s-unordered-list>
+              {state.failed.map((f) => (
+                <s-list-item key={f.name}>
+                  {f.name} — {f.error}
+                </s-list-item>
+              ))}
+            </s-unordered-list>
+          </s-box>
+        </s-stack>
+      )}
+    </s-stack>
+  );
+}
+
 export default function Index() {
-  const { settings, lastRuns } = useLoaderData();
+  const { settings, lastRuns, shop } = useLoaderData();
   const metrics = useMetrics();
   const shopify = useAppBridge();
   const fetcher = useFetcher();
   const modalRef = useRef(null);
   const [form, setForm] = useState(settings);
   const saving = fetcher.state !== "idle";
+  const revalidator = useRevalidator();
+
+  const recordRuns = useCallback(
+    async (runs) => {
+      await fetch("/api/export-complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runs }),
+      });
+      revalidator.revalidate(); // refresh "Last exported" on the cards
+    },
+    [revalidator],
+  );
+  const exporter = useFileExport({ settings, shop, onSuccess: recordRuns });
 
   useEffect(() => {
     if (fetcher.data?.settings) {
@@ -187,14 +278,35 @@ export default function Index() {
           Export your store content as ZIP archives you can keep as a backup or
           import into another store.
         </s-paragraph>
-        <s-stack direction="inline" gap="base">
-          <s-button commandFor="export-settings" command="--show">
-            Export settings
-          </s-button>
-          {/* Wired up in Phase 2 */}
-          <s-button variant="primary" disabled>
-            Download
-          </s-button>
+        <s-stack gap="base">
+          <s-stack direction="inline" gap="base">
+            <s-button
+              commandFor="export-settings"
+              command="--show"
+              disabled={exporter.running}
+            >
+              Export settings
+            </s-button>
+            {exporter.running ? (
+              <s-button tone="critical" onClick={exporter.cancel}>
+                Cancel export
+              </s-button>
+            ) : (
+              <s-button
+                variant="primary"
+                disabled={!settings.includeFiles}
+                onClick={exporter.start}
+              >
+                Download
+              </s-button>
+            )}
+          </s-stack>
+          {!settings.includeFiles && (
+            <s-text color="subdued">
+              Turn on “Files” in Export settings to enable downloading.
+            </s-text>
+          )}
+          <ExportStatus exporter={exporter} />
         </s-stack>
       </s-section>
 
@@ -257,7 +369,11 @@ export default function Index() {
         >
           Save
         </s-button>
-        <s-button slot="secondary-actions" commandFor="export-settings" command="--hide">
+        <s-button
+          slot="secondary-actions"
+          commandFor="export-settings"
+          command="--hide"
+        >
           Cancel
         </s-button>
       </s-modal>

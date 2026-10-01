@@ -39,8 +39,12 @@ export async function getLastRuns(shop) {
 
 // Called by the export flow (Phase 2+) when a run of `type` finishes.
 export async function recordRun(shop, type, itemCount, totalBytes = 0) {
-  // eslint-disable-next-line no-undef
-  const data = { itemCount, totalBytes: BigInt(totalBytes), lastRunAt: new Date() };
+  const data = {
+    itemCount,
+    // eslint-disable-next-line no-undef
+    totalBytes: BigInt(totalBytes),
+    lastRunAt: new Date(),
+  };
   return db.exportRun.upsert({
     where: { shop_type: { shop, type } },
     create: { shop, type, ...data },
