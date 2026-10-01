@@ -19,7 +19,7 @@ const FILES_QUERY = `#graphql
   }`;
 
 // Flattens the per-type shapes into one record. `url` is null when the file isn't ready yet.
-function normalize(node) {
+export function normalize(node) {
   const src = node.imgSrc ?? node.vidSrc ?? node.modelSrc;
   return {
     id: node.id,

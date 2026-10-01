@@ -4,7 +4,7 @@ import { useFetcher, useLoaderData, useRevalidator } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { useFileExport } from "../lib/exporter/useFileExport.js";
+import { useExport } from "../lib/exporter/useExport.js";
 import {
   getExportSettings,
   getLastRuns,
@@ -150,7 +150,9 @@ function ExportStatus({ exporter }) {
   return (
     <s-stack gap="small-200">
       {state.status === "running" && p?.phase === "listing" && (
-        <s-text>Listing files… {p.listed.toLocaleString()} found</s-text>
+        <s-text>
+          Reading store content… {p.listed.toLocaleString()} items found
+        </s-text>
       )}
       {state.status === "running" && p?.total !== undefined && (
         <>
@@ -160,7 +162,7 @@ function ExportStatus({ exporter }) {
             max="100"
           />
           <s-text>
-            {p.done.toLocaleString()} of {p.total.toLocaleString()} files · part{" "}
+            {p.done.toLocaleString()} of {p.total.toLocaleString()} items · part{" "}
             {p.part} · {formatBytes(p.bytes)}
             {p.failed ? ` · ${p.failed} failed` : ""}
           </s-text>
@@ -175,14 +177,16 @@ function ExportStatus({ exporter }) {
               : "Export complete"
           }
         >
-          {state.exported.toLocaleString()} files saved in {state.parts} ZIP{" "}
+          {state.exported.toLocaleString()} items saved in {state.parts} ZIP{" "}
           {state.parts === 1 ? "part" : "parts"}.
           {state.failed.length > 0 &&
             ` ${state.failed.length} could not be downloaded, so this run was not recorded as a complete export.`}
         </s-banner>
       )}
       {state.status === "empty" && (
-        <s-banner tone="info">There are no files to export.</s-banner>
+        <s-banner tone="info">
+          There is nothing to export for the selected content types.
+        </s-banner>
       )}
       {state.status === "cancelled" && (
         <s-banner tone="warning" heading="Export cancelled">
@@ -198,7 +202,7 @@ function ExportStatus({ exporter }) {
       )}
       {state.failed.length > 0 && (
         <s-stack gap="small-300">
-          <s-text type="strong">Failed files</s-text>
+          <s-text type="strong">Failed items</s-text>
           <s-box maxBlockSize="200px" overflow="auto">
             <s-unordered-list>
               {state.failed.map((f) => (
@@ -235,7 +239,8 @@ export default function Index() {
     },
     [revalidator],
   );
-  const exporter = useFileExport({ settings, shop, onSuccess: recordRuns });
+  const anySelected = SETTING_TOGGLES.some(([key]) => settings[key]);
+  const exporter = useExport({ settings, shop, onSuccess: recordRuns });
 
   useEffect(() => {
     if (fetcher.data?.settings) {
@@ -294,16 +299,16 @@ export default function Index() {
             ) : (
               <s-button
                 variant="primary"
-                disabled={!settings.includeFiles}
+                disabled={!anySelected}
                 onClick={exporter.start}
               >
                 Download
               </s-button>
             )}
           </s-stack>
-          {!settings.includeFiles && (
+          {!anySelected && (
             <s-text color="subdued">
-              Turn on “Files” in Export settings to enable downloading.
+              Choose at least one content type in Export settings.
             </s-text>
           )}
           <ExportStatus exporter={exporter} />

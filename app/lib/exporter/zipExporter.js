@@ -1,5 +1,5 @@
 import { Zip, ZipDeflate, ZipPassThrough } from "fflate";
-import { createNameRegistry, fileNameFrom } from "./names.js";
+import { createPlanner } from "./plan.js";
 
 const encoder = new TextEncoder();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -76,6 +76,14 @@ class PartWriter {
     this.bytes += bytes;
   }
 
+  addJson(entry, bytes) {
+    const file = new ZipDeflate(entry.path, { level: 6 });
+    this.zip.add(file);
+    file.push(bytes, true);
+    this.entries.push({ ...entry, size: bytes.length });
+    this.bytes += bytes.length;
+  }
+
   finish(manifest) {
     const file = new ZipDeflate("manifest.json", { level: 6 });
     this.zip.add(file);
@@ -92,20 +100,19 @@ class PartWriter {
 }
 
 /**
- * Downloads every file and packs them into one or more ZIP parts.
+ * Packs items (see plan.js) into one or more ZIP parts, downloading `url` items on the way.
  *
- * Parts are closed once adding the next file would exceed `maxPartBytes` (a single file larger
- * than the limit gets a part of its own). Files with an unknown size count as 0 until their real
- * size is known, so a part can overshoot by at most `concurrency` such files.
+ * Parts are closed once adding the next item would exceed `maxPartBytes` (a single item larger
+ * than the limit gets a part of its own). Items with an unknown size count as 0 until their real
+ * size is known, so a part can overshoot by at most `concurrency` such items.
  *
  * Resolves with { status: "completed" | "cancelled" | "empty", parts, done, failed, bytes }.
- * Individual file failures never reject; they are returned in `failed`.
+ * Individual download failures never reject; they are returned in `failed`.
  */
-export async function exportFiles({
-  files,
+export async function exportItems({
+  items,
   fetchFn = (...args) => fetch(...args),
   maxPartBytes,
-  keepOriginalNames = true,
   concurrency = 4,
   retries = 2,
   retryDelayMs = 500,
@@ -114,28 +121,13 @@ export async function exportFiles({
   onPart,
   manifestInfo = {},
 }) {
-  const total = files.length;
-  const unique = createNameRegistry();
-  const queue = files.map((file) => {
-    const original = fileNameFrom(file);
-    const generated = `${
-      String(file.id ?? "")
-        .split("/")
-        .pop() || "file"
-    }${extOf(original)}`;
-    return {
-      file,
-      path: `files/${unique(keepOriginalNames ? original : generated)}`,
-      originalName: keepOriginalNames ? original : null,
-    };
-  });
-
-  const state = { total, done: 0, bytes: 0, part: 1, parts: 0 };
+  const queue = items;
+  const state = { total: queue.length, done: 0, bytes: 0, part: 1, parts: 0 };
   const failed = [];
   const emit = (phase = "downloading") =>
     onProgress?.({ phase, ...state, failed: failed.length });
 
-  if (total === 0)
+  if (queue.length === 0)
     return { status: "empty", parts: 0, done: 0, failed, bytes: 0 };
   emit();
 
@@ -146,32 +138,23 @@ export async function exportFiles({
     let reserved = 0; // estimated bytes of downloads still running for this part
 
     const runOne = async (item, estimate) => {
-      const { file } = item;
       try {
-        if (!file.url) throw new Error("No download URL (file not ready)");
-        const { chunks, bytes } = await downloadWithRetry(fetchFn, file.url, {
-          signal,
-          retries,
-          retryDelayMs,
-        });
-        part.addFile(
-          {
-            type: "file",
-            kind: file.kind,
-            path: item.path,
-            originalName: item.originalName,
-            alt: file.alt ?? "",
-            mimeType: file.mimeType ?? null,
-            sourceId: file.id,
-            productHandle: null,
-          },
-          chunks,
-          bytes,
-        );
-        state.bytes += bytes;
+        if (item.bytes) {
+          part.addJson({ ...item.entry, path: item.path }, item.bytes);
+          state.bytes += item.bytes.length;
+        } else {
+          if (!item.url) throw new Error("No download URL (file not ready)");
+          const { chunks, bytes } = await downloadWithRetry(fetchFn, item.url, {
+            signal,
+            retries,
+            retryDelayMs,
+          });
+          part.addFile({ ...item.entry, path: item.path }, chunks, bytes);
+          state.bytes += bytes;
+        }
       } catch (error) {
         if (signal?.aborted) return;
-        failed.push({ name: item.path, url: file.url, error: error.message });
+        failed.push({ name: item.path, url: item.url, error: error.message });
       } finally {
         reserved -= estimate;
         if (!signal?.aborted) {
@@ -188,7 +171,7 @@ export async function exportFiles({
         !signal?.aborted
       ) {
         const item = queue[next];
-        const estimate = item.file.size ?? 0;
+        const estimate = item.bytes?.length ?? item.size ?? 0;
         const partHasWork = part.entries.length > 0 || inflight.size > 0;
         if (partHasWork && part.bytes + reserved + estimate > maxPartBytes)
           break;
@@ -209,7 +192,7 @@ export async function exportFiles({
       const blob = part.finish({
         ...manifestInfo,
         app: "imp-exp",
-        version: 1,
+        version: 2,
         part: state.part,
         createdAt: new Date().toISOString(),
       });
@@ -235,7 +218,8 @@ export async function exportFiles({
   };
 }
 
-function extOf(name) {
-  const dot = name.lastIndexOf(".");
-  return dot > 0 ? name.slice(dot) : "";
+// Files-only convenience wrapper (used by the Phase 2 tests).
+export function exportFiles({ files, keepOriginalNames = true, ...options }) {
+  const items = createPlanner({ keepOriginalNames }).fileItems(files);
+  return exportItems({ items, ...options });
 }

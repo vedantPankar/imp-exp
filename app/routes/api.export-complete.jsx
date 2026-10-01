@@ -1,7 +1,14 @@
 import { authenticate } from "../shopify.server";
 import { recordRun } from "../services/settings.server";
 
-const TYPES = new Set(["files", "productMedia", "articles", "pages", "menus"]);
+const TYPES = new Set([
+  "files",
+  "productMedia",
+  "articles",
+  "blogs",
+  "pages",
+  "menus",
+]);
 
 // POST { runs: [{ type, itemCount, totalBytes }] } after an export finishes successfully.
 export const action = async ({ request }) => {

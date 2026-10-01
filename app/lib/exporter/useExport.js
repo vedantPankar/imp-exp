@@ -1,15 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { collectFiles, exportFiles } from "./zipExporter.js";
+import { collectExportData } from "./collect.js";
+import { createDownloader } from "./fetchWithProxy.js";
+import { createPlanner } from "./plan.js";
+import { exportItems } from "./zipExporter.js";
+
+const sumSize = (list) => list.reduce((n, f) => n + (f.size ?? 0), 0);
 
 const IDLE = { status: "idle", progress: null, failed: [], parts: 0 };
-
-async function fetchFilesPage(cursor, signal) {
-  const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
-  const response = await fetch(`/api/files${qs}`, { signal });
-  const json = await response.json();
-  if (!response.ok) throw new Error(json.error || `HTTP ${response.status}`);
-  return json;
-}
 
 // Browsers only start a download from a link click; the object URL is freed right after.
 function saveBlob(blob, filename) {
@@ -24,10 +21,10 @@ function saveBlob(blob, filename) {
 }
 
 /**
- * Drives a file export from the browser. `onSuccess(runs)` is called only when the run
+ * Drives an export from the browser. `onSuccess(runs)` is called only when the run
  * finished without cancellation or failed files.
  */
-export function useFileExport({ settings, shop, onSuccess }) {
+export function useExport({ settings, shop, onSuccess }) {
   const [state, setState] = useState(IDLE);
   const controllerRef = useRef(null);
   const running = state.status === "running";
@@ -41,20 +38,29 @@ export function useFileExport({ settings, shop, onSuccess }) {
       progress: { phase: "listing", listed: 0 },
     });
     const stamp = new Date().toISOString().slice(0, 10);
-    const prefix = `${shop.replace(".myshopify.com", "")}-files-${stamp}`;
+    const prefix = `${shop.replace(".myshopify.com", "")}-export-${stamp}`;
 
     try {
-      const files = await collectFiles(
-        (cursor) => fetchFilesPage(cursor, controller.signal),
-        {
-          signal: controller.signal,
-          onProgress: (progress) => setState((s) => ({ ...s, progress })),
-        },
-      );
-      const result = await exportFiles({
-        files,
-        maxPartBytes: settings.maxPartSizeMb * 1_000_000,
+      const data = await collectExportData({
+        settings,
+        signal: controller.signal,
+        onProgress: (progress) => setState((s) => ({ ...s, progress })),
+      });
+
+      // JSON content goes first so it all lands in part 1 next to its manifest.
+      const planner = createPlanner({
         keepOriginalNames: settings.keepOriginalNames,
+      });
+      const items = [
+        ...planner.contentItems(data),
+        ...planner.fileItems(data.files),
+        ...planner.productMediaItems(data.productMedia),
+      ];
+
+      const result = await exportItems({
+        items,
+        fetchFn: createDownloader(),
+        maxPartBytes: settings.maxPartSizeMb * 1_000_000,
         signal: controller.signal,
         manifestInfo: { shop },
         onProgress: (progress) => setState((s) => ({ ...s, progress })),
@@ -69,9 +75,36 @@ export function useFileExport({ settings, shop, onSuccess }) {
 
       const exported = result.done - result.failed.length;
       if (result.status === "completed" && result.failed.length === 0) {
-        await onSuccess?.([
-          { type: "files", itemCount: exported, totalBytes: result.bytes },
-        ]);
+        const runs = [
+          settings.includeFiles && {
+            type: "files",
+            itemCount: data.files.length,
+            totalBytes: sumSize(data.files),
+          },
+          settings.includeProductMedia && {
+            type: "productMedia",
+            itemCount: new Set(data.productMedia.map((m) => m.productHandle))
+              .size,
+            totalBytes: sumSize(data.productMedia),
+          },
+          settings.includeBlogPosts && {
+            type: "blogs",
+            itemCount: data.blogs.length,
+          },
+          settings.includeBlogPosts && {
+            type: "articles",
+            itemCount: data.articles.length,
+          },
+          settings.includePages && {
+            type: "pages",
+            itemCount: data.pages.length,
+          },
+          settings.includeMenus && {
+            type: "menus",
+            itemCount: data.menus.length,
+          },
+        ].filter(Boolean);
+        await onSuccess?.(runs);
       }
       setState((s) => ({
         ...s,
@@ -87,7 +120,7 @@ export function useFileExport({ settings, shop, onSuccess }) {
         error: error.message,
       }));
     }
-  }, [settings.maxPartSizeMb, settings.keepOriginalNames, shop, onSuccess]);
+  }, [settings, shop, onSuccess]);
 
   const cancel = useCallback(() => controllerRef.current?.abort(), []);
 
