@@ -2,6 +2,7 @@ const TYPES = ["files", "productMedia", "blogs", "articles", "pages", "menus"];
 const UPLOAD_BATCH = 20; // staged targets + uploads per round
 const UPLOAD_CONCURRENCY = 4;
 const CONTENT_BATCH = 10;
+const CHECK_BATCH = 10; // products per pre-check request
 
 const MIME_BY_EXT = {
   jpg: "image/jpeg",
@@ -270,7 +271,59 @@ export async function runImport({
   const sortedMedia = [...items.productMedia].sort(
     (a, b) => a.archive - b.archive || (a.position ?? 0) - (b.position ?? 0),
   );
-  for (const batch of chunks(sortedMedia, UPLOAD_BATCH)) {
+  const nameOf = (entry) => entry.originalName || baseName(entry.path);
+
+  // Check products first so nothing is uploaded for products that don't exist or
+  // already have the image.
+  const byProduct = new Map();
+  for (const entry of sortedMedia) {
+    if (!byProduct.has(entry.productHandle))
+      byProduct.set(entry.productHandle, []);
+    byProduct.get(entry.productHandle).push(entry);
+  }
+  const pending = [];
+  for (const group of chunks([...byProduct.entries()], CHECK_BATCH)) {
+    if (cancelled()) break;
+    let results;
+    try {
+      ({ results } = await call("checkProductMedia", {
+        items: group.map(([handle, entries]) => ({
+          handle,
+          filenames: entries.map(nameOf),
+        })),
+      }));
+    } catch (error) {
+      group.forEach(([, entries]) =>
+        failAll("productMedia", entries, error.message),
+      );
+      continue;
+    }
+    group.forEach(([handle, entries], g) => {
+      const r = results[g];
+      entries.forEach((entry, i) => {
+        if (r.error) {
+          record("productMedia", entry.path, {
+            status: "failed",
+            error: r.error,
+          });
+        } else if (!r.found) {
+          record("productMedia", entry.path, {
+            status: "failed",
+            error: `Product “${handle}” not found in this store; create it first`,
+          });
+        } else if (r.present[i] && !settings.replaceExisting) {
+          record("productMedia", entry.path, {
+            status: "skipped",
+            error: "Already on this product",
+          });
+        } else {
+          pending.push(entry);
+        }
+      });
+    });
+  }
+
+  for (const batch of chunks(pending, UPLOAD_BATCH)) {
     if (cancelled()) break;
     const up = await uploadEntries(batch, mediaKind);
     up.filter((o) => o.error).forEach((o) =>

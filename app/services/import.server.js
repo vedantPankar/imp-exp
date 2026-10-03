@@ -99,8 +99,15 @@ export async function createFiles(admin, files, replace) {
 
 // ---------- Product media ----------
 
+const safeDecode = (value) => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value; // malformed % sequences in a file name must not crash the import
+  }
+};
 const normalizeName = (name) =>
-  decodeURIComponent(String(name || ""))
+  safeDecode(String(name || ""))
     .toLowerCase()
     .replace(/[^a-z0-9.]+/g, "_");
 const nameFromUrl = (url) => {
@@ -110,6 +117,76 @@ const nameFromUrl = (url) => {
     return "";
   }
 };
+
+const PRODUCT_MEDIA_FIELDS = `
+  id
+  media(first: 250) {
+    nodes { id ... on MediaImage { image { url } } ... on Video { originalSource { url } } }
+  }`;
+
+// Finds a product (with its media file names) by handle. `productByIdentifier` is the direct
+// lookup; the search query is a fallback so one flaky lookup doesn't report a real product as missing.
+async function findProductWithMedia(admin, handle) {
+  const direct = await adminGraphql(
+    admin,
+    `#graphql
+    query ProductForMedia($handle: String!) {
+      productByIdentifier(identifier: { handle: $handle }) { ${PRODUCT_MEDIA_FIELDS} }
+    }`,
+    { handle },
+  );
+  let product = direct.productByIdentifier;
+  if (!product) {
+    const search = await adminGraphql(
+      admin,
+      `#graphql
+      query ProductSearchForMedia($q: String!) {
+        products(first: 1, query: $q) { nodes { handle ${PRODUCT_MEDIA_FIELDS} } }
+      }`,
+      { q: `handle:${handle}` },
+    );
+    const hit = search.products.nodes[0];
+    product = hit?.handle === handle ? hit : null;
+  }
+  if (!product) return null;
+  return {
+    id: product.id,
+    existing: new Map(
+      product.media.nodes.map((n) => [
+        nameFromUrl(n.image?.url ?? n.originalSource?.url),
+        n.id,
+      ]),
+    ),
+  };
+}
+
+/**
+ * Cheap pre-check so the client doesn't upload images for products that don't exist or that
+ * already have them. products: [{ handle, filenames }] -> [{ found, present: boolean[] }]
+ */
+export async function checkProductMedia(admin, products) {
+  const out = [];
+  for (const { handle, filenames } of products) {
+    try {
+      const product = HANDLE.test(handle || "")
+        ? await findProductWithMedia(admin, handle)
+        : null;
+      out.push(
+        product
+          ? {
+              found: true,
+              present: filenames.map((f) =>
+                product.existing.has(normalizeName(f)),
+              ),
+            }
+          : { found: false, present: filenames.map(() => false) },
+      );
+    } catch (error) {
+      out.push({ error: error.message });
+    }
+  }
+  return out;
+}
 
 /**
  * Re-attaches media to the product with `handle`.
@@ -124,33 +201,14 @@ export async function attachProductMedia(admin, { handle, media }, replace) {
       error: "Invalid product handle",
     }));
   }
-  const data = await adminGraphql(
-    admin,
-    `#graphql
-    query ProductForMedia($handle: String!) {
-      productByIdentifier(identifier: { handle: $handle }) {
-        id
-        media(first: 250) {
-          nodes { id ... on MediaImage { image { url } } ... on Video { originalSource { url } } }
-        }
-      }
-    }`,
-    { handle },
-  );
-  const product = data.productByIdentifier;
+  const product = await findProductWithMedia(admin, handle);
   if (!product) {
     return media.map(() => ({
       status: "failed",
       error: `Product “${handle}” not found in this store`,
     }));
   }
-
-  const existing = new Map(
-    product.media.nodes.map((n) => [
-      nameFromUrl(n.image?.url ?? n.originalSource?.url),
-      n.id,
-    ]),
-  );
+  const existing = product.existing;
   const results = media.map(() => null);
   const toAdd = [];
   const toDelete = [];

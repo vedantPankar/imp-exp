@@ -193,7 +193,10 @@ test("articles without an image skip fileCreate entirely", async () => {
   );
 });
 
-import { upsertMenus } from "../app/services/import.server.js";
+import {
+  checkProductMedia,
+  upsertMenus,
+} from "../app/services/import.server.js";
 
 test("menu with a store-specific link is retried without it and keeps the rest", async () => {
   const saved = [];
@@ -261,4 +264,58 @@ test("menu with a store-specific link is retried without it and keeps the rest",
     saved.at(-1).map((i) => i.title),
     ["Help"],
   );
+});
+
+test("product lookup falls back to a search when the direct lookup misses", async () => {
+  const reply = (data) => ({ json: async () => ({ data }) });
+  const media = {
+    nodes: [
+      {
+        id: "m1",
+        image: { url: "https://cdn.shopify.com/s/Main_abc.jpg?v=1" },
+      },
+    ],
+  };
+  const admin = {
+    graphql: async (query, { variables }) => {
+      if (query.includes("ProductForMedia"))
+        return reply({ productByIdentifier: null });
+      if (query.includes("ProductSearchForMedia"))
+        return reply({
+          products: {
+            nodes:
+              variables.q === "handle:shirt"
+                ? [{ handle: "shirt", id: "p1", media }]
+                : [],
+          },
+        });
+      throw new Error("unexpected");
+    },
+  };
+  const out = await checkProductMedia(admin, [
+    { handle: "shirt", filenames: ["Main_abc.jpg", "other.jpg"] },
+    { handle: "ghost", filenames: ["a.jpg"] },
+    { handle: "bad handle!", filenames: ["a.jpg"] },
+  ]);
+  assert.deepEqual(out[0], { found: true, present: [true, false] });
+  assert.equal(out[1].found, false);
+  assert.equal(out[2].found, false); // never put unvetted text into a search query
+});
+
+test("a search hit for a different handle is not treated as the product", async () => {
+  const reply = (data) => ({ json: async () => ({ data }) });
+  const admin = {
+    graphql: async (query) =>
+      query.includes("ProductForMedia")
+        ? reply({ productByIdentifier: null })
+        : reply({
+            products: {
+              nodes: [{ handle: "shirt-2", id: "p2", media: { nodes: [] } }],
+            },
+          }),
+  };
+  const [r] = await checkProductMedia(admin, [
+    { handle: "shirt", filenames: ["a.jpg"] },
+  ]);
+  assert.equal(r.found, false);
 });

@@ -113,6 +113,8 @@ function fakeServer({
   failUpload = new Set(),
   existing = new Set(),
   flaky = 0,
+  missing = new Set(),
+  have = new Set(),
 } = {}) {
   const calls = [];
   let failures = flaky;
@@ -139,6 +141,13 @@ function fakeServer({
                 }
               : { status: payload.replace ? "replaced" : "created" },
           ),
+        };
+      case "checkProductMedia":
+        return {
+          results: payload.items.map((p) => ({
+            found: !missing.has(p.handle),
+            present: p.filenames.map((f) => have.has(f)),
+          })),
         };
       case "attachProductMedia":
         return { results: payload.media.map(() => ({ status: "created" })) };
@@ -184,6 +193,7 @@ test("imports everything in order, in batches of at most 20 uploads", async () =
   assert.deepEqual(order, [
     "stage",
     "createFiles",
+    "checkProductMedia",
     "attachProductMedia",
     "blogs",
     "articles",
@@ -353,4 +363,55 @@ test("cancel stops further batches", async () => {
   assert.equal(r.status, "cancelled");
   assert.ok(r.summary.files.created < 100);
   assert.equal(r.summary.menus.created, 0);
+});
+
+test("products that are missing or already have the image never trigger an upload", async () => {
+  // shirt exists but already has shirt-1.jpg; hat doesn't exist at all
+  const s = fakeServer({
+    missing: new Set(["hat"]),
+    have: new Set(["shirt-1.jpg"]),
+  });
+  const r = await runImport({
+    archives: await makeArchives({ nFiles: 1 }),
+    settings,
+    api: s.api,
+    upload: s.upload,
+  });
+  assert.equal(r.summary.productMedia.failed, 1); // hat-3.jpg
+  assert.equal(r.summary.productMedia.skipped, 1); // shirt-1.jpg
+  assert.equal(r.summary.productMedia.created, 1); // shirt-2.jpg
+  assert.deepEqual(
+    r.errors.map((e) => e.error),
+    ["Product “hat” not found in this store; create it first"],
+  );
+  assert.ok(
+    !s.uploads.includes("hat-3.jpg"),
+    "no upload for a missing product",
+  );
+  assert.ok(
+    !s.uploads.includes("shirt-1.jpg"),
+    "no upload for an existing image",
+  );
+  assert.ok(s.uploads.includes("shirt-2.jpg"));
+  const attach = s.calls.filter((c) => c.intent === "attachProductMedia");
+  assert.deepEqual(
+    attach.map((c) => c.payload.handle),
+    ["shirt"],
+  );
+  assert.deepEqual(
+    attach[0].payload.media.map((m) => m.filename),
+    ["shirt-2.jpg"],
+  );
+});
+
+test("replace on re-uploads images that are already on the product", async () => {
+  const s = fakeServer({ have: new Set(["shirt-1.jpg"]) });
+  const r = await runImport({
+    archives: await makeArchives({ nFiles: 1 }),
+    settings: { ...settings, replaceExisting: true },
+    api: s.api,
+    upload: s.upload,
+  });
+  assert.equal(r.summary.productMedia.skipped, 0);
+  assert.ok(s.uploads.includes("shirt-1.jpg"));
 });
