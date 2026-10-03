@@ -230,6 +230,9 @@ export default function Index() {
   const fetcher = useFetcher();
   const modalRef = useRef(null);
   const [form, setForm] = useState(settings);
+  // Read event values before calling this: currentTarget is null once the handler returns,
+  // so it must not be touched inside the state updater.
+  const update = (key, value) => setForm((f) => ({ ...f, [key]: value }));
   const saving = fetcher.state !== "idle";
   const revalidator = useRevalidator();
 
@@ -380,9 +383,7 @@ export default function Index() {
               key={key}
               label={label}
               checked={form[key]}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, [key]: e.currentTarget.checked }))
-              }
+              onChange={(e) => update(key, e.currentTarget.checked)}
             />
           ))}
           <s-number-field
@@ -390,18 +391,13 @@ export default function Index() {
             min="50"
             max="4000"
             value={String(form.maxPartSizeMb)}
-            onInput={(e) =>
-              setForm((f) => ({ ...f, maxPartSizeMb: e.currentTarget.value }))
-            }
+            onInput={(e) => update("maxPartSizeMb", e.currentTarget.value)}
           />
           <s-checkbox
             label="Keep original file names"
             checked={form.keepOriginalNames}
             onChange={(e) =>
-              setForm((f) => ({
-                ...f,
-                keepOriginalNames: e.currentTarget.checked,
-              }))
+              update("keepOriginalNames", e.currentTarget.checked)
             }
           />
         </s-stack>

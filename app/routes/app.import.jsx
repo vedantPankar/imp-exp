@@ -115,6 +115,9 @@ export default function ImportPage() {
   const fetcher = useFetcher();
   const modalRef = useRef(null);
   const [form, setForm] = useState(settings);
+  // Read event values before calling this: currentTarget is null once the handler returns,
+  // so it must not be touched inside the state updater.
+  const update = (key, value) => setForm((f) => ({ ...f, [key]: value }));
   const [files, setFiles] = useState([]);
   const importer = useImport({ settings });
   const { state } = importer;
@@ -261,12 +264,7 @@ export default function ImportPage() {
             label="Replace existing files with the same name"
             details="When off, files that already exist are skipped."
             checked={form.replaceExisting}
-            onChange={(e) =>
-              setForm((f) => ({
-                ...f,
-                replaceExisting: e.currentTarget.checked,
-              }))
-            }
+            onChange={(e) => update("replaceExisting", e.currentTarget.checked)}
           />
           <s-text type="strong">Import these content types</s-text>
           {TOGGLES.map(([key, label]) => (
@@ -274,9 +272,7 @@ export default function ImportPage() {
               key={key}
               label={label}
               checked={form[key]}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, [key]: e.currentTarget.checked }))
-              }
+              onChange={(e) => update(key, e.currentTarget.checked)}
             />
           ))}
           <s-text color="subdued">
