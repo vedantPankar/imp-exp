@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createArchiveSet } from "./zipReader.js";
 import { runImport } from "./importer.js";
 
-// Calls /api/import. 429/5xx are marked retriable; auth/plan errors (4xx) are not.
+// Calls /api/import. 429/5xx are marked retriable; other 4xx errors are not.
 async function api(intent, payload, signal) {
   const response = await fetch("/api/import", {
     method: "POST",
@@ -14,7 +14,6 @@ async function api(intent, payload, signal) {
   if (!response.ok) {
     throw Object.assign(new Error(json.error || `HTTP ${response.status}`), {
       retriable: response.status === 429 || response.status >= 500,
-      planRequired: response.status === 402,
     });
   }
   return json;

@@ -1,6 +1,5 @@
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
-import { clearPlanCache } from "../services/plan.server";
 
 export const action = async ({ request }) => {
   const { shop, session, topic } = await authenticate.webhook(request);
@@ -14,6 +13,5 @@ export const action = async ({ request }) => {
   }
 
   // Settings are kept until shop/redact in case the merchant reinstalls.
-  clearPlanCache(shop);
   return new Response();
 };

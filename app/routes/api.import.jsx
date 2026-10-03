@@ -1,5 +1,4 @@
 import { authenticate } from "../shopify.server";
-import { assertImportAllowed } from "../services/plan.server";
 import {
   attachProductMedia,
   createFiles,
@@ -14,8 +13,7 @@ const MAX_BATCH = 50;
 
 // POST { intent, ... } — thin dispatcher; the Admin API work lives in services/import.server.js
 export const action = async ({ request }) => {
-  const { admin, billing, session } = await authenticate.admin(request);
-  await assertImportAllowed(billing, session.shop); // enforced here, not just in the UI
+  const { admin } = await authenticate.admin(request);
 
   let body;
   try {

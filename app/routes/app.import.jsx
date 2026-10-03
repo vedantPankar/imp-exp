@@ -9,16 +9,10 @@ import {
   saveImportSettings,
 } from "../services/settings.server";
 import { useImport } from "../lib/importer/useImport.js";
-import { getPlan } from "../services/plan.server";
-import { UpgradeBanner } from "../components/PlanBanner.jsx";
 
 export const loader = async ({ request }) => {
-  const { session, billing } = await authenticate.admin(request);
-  const [settings, plan] = await Promise.all([
-    getImportSettings(session.shop),
-    getPlan(billing, session.shop),
-  ]);
-  return { settings, isPro: plan.isPro };
+  const { session } = await authenticate.admin(request);
+  return { settings: await getImportSettings(session.shop) };
 };
 
 export const action = async ({ request }) => {
@@ -110,7 +104,7 @@ function IssueList({ title, items }) {
 }
 
 export default function ImportPage() {
-  const { settings, isPro } = useLoaderData();
+  const { settings } = useLoaderData();
   const shopify = useAppBridge();
   const fetcher = useFetcher();
   const modalRef = useRef(null);
@@ -145,7 +139,6 @@ export default function ImportPage() {
 
   return (
     <s-page heading="Import">
-      {!isPro && <UpgradeBanner />}
       <s-banner tone="info" heading="Keep this tab open while importing">
         Files are unpacked and uploaded from your browser. Closing the tab stops
         the import.
@@ -161,7 +154,7 @@ export default function ImportPage() {
             accept=".zip,application/zip"
             multiple
             label="Drop ZIP files here or click to select"
-            disabled={importer.running || !isPro}
+            disabled={importer.running}
             onChange={onFiles}
             onDropRejected={() =>
               shopify.toast.show("Only .zip files are accepted", {
@@ -193,7 +186,7 @@ export default function ImportPage() {
             ) : (
               <s-button
                 variant="primary"
-                disabled={!isPro || files.length === 0 || !anySelected}
+                disabled={files.length === 0 || !anySelected}
                 onClick={() => importer.start(files)}
               >
                 Start import
