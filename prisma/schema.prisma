@@ -53,6 +53,7 @@ model ImportSettings {
   importBlogPosts     Boolean  @default(true)
   importPages         Boolean  @default(true)
   importMenus         Boolean  @default(true)
+  createMissingProducts Boolean @default(false)
   updatedAt           DateTime @updatedAt
 }
 

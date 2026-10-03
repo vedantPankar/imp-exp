@@ -2,6 +2,7 @@ import { authenticate } from "../shopify.server";
 import {
   attachProductMedia,
   checkProductMedia,
+  createDraftProducts,
   createFiles,
   createStagedUploads,
   upsertArticles,
@@ -43,6 +44,10 @@ export const action = async ({ request }) => {
       case "checkProductMedia":
         return Response.json({
           results: await checkProductMedia(admin, body.items),
+        });
+      case "createProducts":
+        return Response.json({
+          results: await createDraftProducts(admin, body.items),
         });
       case "attachProductMedia":
         return Response.json({

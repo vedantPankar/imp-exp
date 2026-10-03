@@ -59,6 +59,7 @@ export const IMPORT_BOOLEANS = [
   "importBlogPosts",
   "importPages",
   "importMenus",
+  "createMissingProducts",
 ];
 
 export async function getImportSettings(shop) {

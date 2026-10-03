@@ -259,6 +259,14 @@ export default function ImportPage() {
             checked={form.replaceExisting}
             onChange={(e) => update("replaceExisting", e.currentTarget.checked)}
           />
+          <s-checkbox
+            label="Create missing products as drafts"
+            details="Product media is attached to products with the same handle. When a product doesn't exist, create an empty draft (title and handle only) so the images aren't lost."
+            checked={form.createMissingProducts}
+            onChange={(e) =>
+              update("createMissingProducts", e.currentTarget.checked)
+            }
+          />
           <s-text type="strong">Import these content types</s-text>
           {TOGGLES.map(([key, label]) => (
             <s-checkbox

@@ -23,6 +23,9 @@ const MIME_BY_EXT = {
   zip: "application/zip",
 };
 
+// "the-complete-snowboard" -> "The Complete Snowboard" (used when the export has no title)
+const titleFromHandle = (handle) =>
+  handle.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 const baseName = (path) => path.split("/").pop();
 const mimeFor = (entry) =>
   entry.mimeType ||
@@ -297,6 +300,45 @@ export async function runImport({
         failAll("productMedia", entries, error.message),
       );
       continue;
+    }
+    // Optionally recreate missing products as drafts so their media can be attached.
+    if (settings.createMissingProducts) {
+      const missing = group.filter(([, ,], g) => results[g].found === false);
+      if (missing.length) {
+        try {
+          const created = await call("createProducts", {
+            items: missing.map(([handle, entries]) => ({
+              handle,
+              title:
+                entries.find((e) => e.productTitle)?.productTitle ??
+                titleFromHandle(handle),
+            })),
+          });
+          missing.forEach(([handle, entries], m) => {
+            const outcome = created.results[m];
+            const g = group.findIndex(([h]) => h === handle);
+            if (outcome.status === "created") {
+              results[g] = { found: true, present: entries.map(() => false) };
+              warnings.push({
+                type: "productMedia",
+                name: handle,
+                message:
+                  "Product did not exist; created as a draft (title and handle only)",
+              });
+            } else {
+              results[g] = {
+                error: `Could not create product: ${outcome.error}`,
+              };
+            }
+          });
+        } catch (error) {
+          missing.forEach(([handle]) => {
+            results[group.findIndex(([h]) => h === handle)] = {
+              error: `Could not create product: ${error.message}`,
+            };
+          });
+        }
+      }
     }
     group.forEach(([handle, entries], g) => {
       const r = results[g];

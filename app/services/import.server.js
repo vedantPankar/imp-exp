@@ -687,3 +687,36 @@ export function upsertMenus(admin, menus) {
     return { status: existing ? "updated" : "created", warnings };
   });
 }
+
+// ---------- Missing products ----------
+
+// Creates bare draft products (title + handle only) so their media has somewhere to go.
+// Prices, variants and descriptions are not part of the export and are not restored.
+export function createDraftProducts(admin, products) {
+  return run(products, async ({ handle, title }) => {
+    if (!HANDLE.test(handle || ""))
+      return { status: "failed", error: "Invalid product handle" };
+    const data = await adminGraphql(
+      admin,
+      `#graphql
+      mutation CreateDraftProduct($product: ProductCreateInput!) {
+        productCreate(product: $product) {
+          product { id handle }
+          userErrors { field message }
+        }
+      }`,
+      { product: { title: title || handle, handle, status: "DRAFT" } },
+    );
+    const { product, userErrors } = data.productCreate;
+    if (userErrors.length)
+      return { status: "failed", error: errorText(userErrors) };
+    // Shopify may suffix a taken handle ("x-1"); media would then attach to the wrong product
+    if (product.handle !== handle) {
+      return {
+        status: "failed",
+        error: `Handle “${handle}” is taken; Shopify created “${product.handle}” instead`,
+      };
+    }
+    return { status: "created" };
+  });
+}

@@ -115,6 +115,7 @@ function fakeServer({
   flaky = 0,
   missing = new Set(),
   have = new Set(),
+  cannotCreate = new Set(),
 } = {}) {
   const calls = [];
   let failures = flaky;
@@ -148,6 +149,14 @@ function fakeServer({
             found: !missing.has(p.handle),
             present: p.filenames.map((f) => have.has(f)),
           })),
+        };
+      case "createProducts":
+        return {
+          results: payload.items.map((p) =>
+            cannotCreate.has(p.handle)
+              ? { status: "failed", error: "Handle is taken" }
+              : { status: "created" },
+          ),
         };
       case "attachProductMedia":
         return { results: payload.media.map(() => ({ status: "created" })) };
@@ -414,4 +423,82 @@ test("replace on re-uploads images that are already on the product", async () =>
   });
   assert.equal(r.summary.productMedia.skipped, 0);
   assert.ok(s.uploads.includes("shirt-1.jpg"));
+});
+
+test("createMissingProducts creates drafts for missing handles, then attaches media", async () => {
+  const s = fakeServer({ missing: new Set(["hat"]) });
+  const r = await runImport({
+    archives: await makeArchives({ nFiles: 1 }),
+    settings: { ...settings, createMissingProducts: true },
+    api: s.api,
+    upload: s.upload,
+  });
+  assert.equal(r.errors.length, 0);
+  assert.equal(r.summary.productMedia.created, 3);
+  const create = s.calls.find((c) => c.intent === "createProducts").payload
+    .items;
+  assert.deepEqual(create, [{ handle: "hat", title: "Hat" }]); // title derived from the handle
+  assert.ok(
+    r.warnings.some(
+      (w) => w.name === "hat" && /created as a draft/.test(w.message),
+    ),
+  );
+  // creation happens before any upload for that product
+  const intents = s.calls.map((c) => c.intent);
+  assert.ok(intents.indexOf("createProducts") < intents.lastIndexOf("stage"));
+});
+
+test("uses the exported product title when the manifest has one", async () => {
+  const { createPlanner } = await import("../app/lib/exporter/plan.js");
+  const { exportItems } = await import("../app/lib/exporter/zipExporter.js");
+  const planner = createPlanner();
+  const items = planner.productMediaItems([
+    { ...mediaRec("hat", 3, 0), productTitle: "Fancy Hat™" },
+  ]);
+  const parts = [];
+  await exportItems({
+    items,
+    maxPartBytes: 1e9,
+    fetchFn: async () => new Response(new Uint8Array(5)),
+    onPart: async (p) => parts.push(new File([p.blob], "p.zip")),
+  });
+  const s = fakeServer({ missing: new Set(["hat"]) });
+  await runImport({
+    archives: createArchiveSet(parts),
+    settings: { ...settings, createMissingProducts: true },
+    api: s.api,
+    upload: s.upload,
+  });
+  assert.equal(
+    s.calls.find((c) => c.intent === "createProducts").payload.items[0].title,
+    "Fancy Hat™",
+  );
+});
+
+test("a product that can't be created fails its media with the reason; others continue", async () => {
+  const s = fakeServer({
+    missing: new Set(["hat"]),
+    cannotCreate: new Set(["hat"]),
+  });
+  const r = await runImport({
+    archives: await makeArchives({ nFiles: 1 }),
+    settings: { ...settings, createMissingProducts: true },
+    api: s.api,
+    upload: s.upload,
+  });
+  assert.equal(r.summary.productMedia.failed, 1);
+  assert.equal(r.summary.productMedia.created, 2);
+  assert.match(r.errors[0].error, /Could not create product: Handle is taken/);
+  assert.ok(!s.uploads.includes("hat-3.jpg"));
+});
+
+test("without the option, missing products are still just reported", async () => {
+  const s = fakeServer({ missing: new Set(["hat"]) });
+  await runImport({
+    archives: await makeArchives({ nFiles: 1 }),
+    settings,
+    api: s.api,
+    upload: s.upload,
+  });
+  assert.ok(!s.calls.some((c) => c.intent === "createProducts"));
 });

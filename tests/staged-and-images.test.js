@@ -195,6 +195,7 @@ test("articles without an image skip fileCreate entirely", async () => {
 
 import {
   checkProductMedia,
+  createDraftProducts,
   upsertMenus,
 } from "../app/services/import.server.js";
 
@@ -318,4 +319,32 @@ test("a search hit for a different handle is not treated as the product", async 
     { handle: "shirt", filenames: ["a.jpg"] },
   ]);
   assert.equal(r.found, false);
+});
+
+test("draft products are created as DRAFT with the exact handle", async () => {
+  const reply = (data) => ({ json: async () => ({ data }) });
+  const sent = [];
+  const admin = {
+    graphql: async (query, { variables }) => {
+      sent.push(variables.product);
+      const handle =
+        variables.product.handle === "taken"
+          ? "taken-1"
+          : variables.product.handle;
+      return reply({
+        productCreate: { product: { id: "p", handle }, userErrors: [] },
+      });
+    },
+  };
+  const out = await createDraftProducts(admin, [
+    { handle: "hat", title: "Hat" },
+    { handle: "taken", title: "Taken" },
+    { handle: "bad handle", title: "x" },
+  ]);
+  assert.deepEqual(sent[0], { title: "Hat", handle: "hat", status: "DRAFT" });
+  assert.equal(out[0].status, "created");
+  assert.equal(out[1].status, "failed"); // Shopify renamed the handle: media would attach to the wrong product
+  assert.match(out[1].error, /taken-1/);
+  assert.equal(out[2].status, "failed");
+  assert.equal(sent.length, 2);
 });

@@ -103,6 +103,7 @@ export function createPlanner({ keepOriginalNames = true } = {}) {
             mimeType: m.mimeType ?? null,
             sourceId: m.id,
             productHandle: m.productHandle,
+            productTitle: m.productTitle ?? null,
             position: m.position,
           },
         };

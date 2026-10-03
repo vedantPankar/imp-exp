@@ -18,6 +18,7 @@ const PRODUCTS_QUERY = `#graphql
       nodes {
         id
         handle
+        title
         media(first: 25) {
           nodes { ${MEDIA_FIELDS} }
           pageInfo { hasNextPage endCursor }
@@ -61,6 +62,7 @@ export async function listProductMediaPage(admin, cursor) {
         ...normalize(node),
         productId: product.id,
         productHandle: product.handle,
+        productTitle: product.title,
         position,
       });
     });
