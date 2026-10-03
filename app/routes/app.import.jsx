@@ -89,7 +89,7 @@ function IssueList({ title, items }) {
       <s-text type="strong">
         {title} ({items.length})
       </s-text>
-      <s-box maxBlockSize="240px" overflow="auto">
+      <div style={{ maxHeight: "240px", overflowY: "auto" }}>
         <s-unordered-list>
           {items.map((item, i) => (
             <s-list-item key={i}>
@@ -98,7 +98,7 @@ function IssueList({ title, items }) {
             </s-list-item>
           ))}
         </s-unordered-list>
-      </s-box>
+      </div>
     </s-stack>
   );
 }

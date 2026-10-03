@@ -210,7 +210,7 @@ function ExportStatus({ exporter }) {
       {state.failed.length > 0 && (
         <s-stack gap="small-300">
           <s-text type="strong">Failed items</s-text>
-          <s-box maxBlockSize="200px" overflow="auto">
+          <div style={{ maxHeight: "200px", overflowY: "auto" }}>
             <s-unordered-list>
               {state.failed.map((f) => (
                 <s-list-item key={f.name}>
@@ -218,7 +218,7 @@ function ExportStatus({ exporter }) {
                 </s-list-item>
               ))}
             </s-unordered-list>
-          </s-box>
+          </div>
         </s-stack>
       )}
     </s-stack>
