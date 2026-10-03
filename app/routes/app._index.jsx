@@ -204,6 +204,13 @@ function ExportStatus({ exporter }) {
           {state.error}
         </s-banner>
       )}
+      {state.skipped?.length > 0 && (
+        <s-banner tone="info">
+          {state.skipped.length} external video
+          {state.skipped.length === 1 ? "" : "s"} skipped: they are links
+          (YouTube/Vimeo), so there is no file to download.
+        </s-banner>
+      )}
       {state.failed.length > 0 && (
         <s-stack gap="small-300">
           <s-text type="strong">Failed items</s-text>

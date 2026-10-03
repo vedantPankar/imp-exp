@@ -111,6 +111,7 @@ export function useExport({ settings, shop, onSuccess }) {
         status: result.status,
         failed: result.failed,
         exported,
+        skipped: data.skipped,
         parts: result.parts,
       }));
     } catch (error) {

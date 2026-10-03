@@ -1,4 +1,4 @@
-import { normalizeMenuItem } from "./plan.js";
+import { normalizeMenuItem, splitDownloadable } from "./plan.js";
 
 async function getJson(url, signal) {
   const response = await fetch(url, { signal });
@@ -42,6 +42,7 @@ export async function collectExportData({ settings, signal, onProgress }) {
     articles: [],
     pages: [],
     menus: [],
+    skipped: [],
   };
 
   if (settings.includeProductMedia) {
@@ -54,7 +55,11 @@ export async function collectExportData({ settings, signal, onProgress }) {
   if (settings.includeFiles) {
     const files = await pageAll("/api/files", signal, count);
     const productMediaIds = new Set(data.productMedia.map((m) => m.id));
-    data.files = files.filter((f) => !productMediaIds.has(f.id));
+    const { downloadable, skipped } = splitDownloadable(
+      files.filter((f) => !productMediaIds.has(f.id)),
+    );
+    data.files = downloadable;
+    data.skipped = skipped;
   }
   if (settings.includeBlogPosts) {
     data.blogs = await pageAll("/api/content?type=blogs", signal, count);

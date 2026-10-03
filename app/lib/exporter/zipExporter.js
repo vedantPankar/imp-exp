@@ -143,7 +143,7 @@ export async function exportItems({
           part.addJson({ ...item.entry, path: item.path }, item.bytes);
           state.bytes += item.bytes.length;
         } else {
-          if (!item.url) throw new Error("No download URL (file not ready)");
+          if (!item.url) throw new Error(item.noUrlReason ?? "No download URL");
           const { chunks, bytes } = await downloadWithRetry(fetchFn, item.url, {
             signal,
             retries,

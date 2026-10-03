@@ -8,7 +8,9 @@ const FILES_QUERY = `#graphql
         __typename
         id
         alt
+        fileStatus
         createdAt
+        ... on ExternalVideo { embedUrl }
         ... on MediaImage { mimeType image { url } imgSrc: originalSource { fileSize url } }
         ... on Video { filename vidSrc: originalSource { url fileSize mimeType } }
         ... on GenericFile { mimeType url originalFileSize }
@@ -24,6 +26,8 @@ export function normalize(node) {
   return {
     id: node.id,
     kind: node.__typename,
+    status: node.fileStatus ?? null,
+    embedUrl: node.embedUrl ?? null,
     url: node.url ?? src?.url ?? node.image?.url ?? null,
     alt: node.alt ?? "",
     filename: node.filename ?? null,

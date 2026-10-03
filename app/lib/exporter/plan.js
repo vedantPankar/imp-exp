@@ -1,6 +1,10 @@
 import { createNameRegistry, fileNameFrom } from "./names.js";
 
 const encoder = new TextEncoder();
+const noUrlReason = (file) =>
+  file.status && file.status !== "READY"
+    ? `File is not ready (status ${file.status.toLowerCase()}); try again later`
+    : "Shopify returned no download URL for this file";
 const idOf = (gid) =>
   String(gid ?? "")
     .split("/")
@@ -25,6 +29,19 @@ const safeSegment = (value) =>
  *   json item:     { path, bytes, entry }       -> written inline (deflated)
  * `entry` is what ends up in manifest.json for the item.
  */
+// External videos (YouTube/Vimeo links) have no file to download; that is not a failure.
+// Files that are still processing have no URL yet and are reported as failed with the reason.
+export function splitDownloadable(files) {
+  const external = files.filter((f) => f.kind === "ExternalVideo");
+  return {
+    downloadable: files.filter((f) => f.kind !== "ExternalVideo"),
+    skipped: external.map((f) => ({
+      name: f.embedUrl || f.id,
+      reason: "External video: nothing to download",
+    })),
+  };
+}
+
 export function createPlanner({ keepOriginalNames = true } = {}) {
   const unique = createNameRegistry();
   const folderNames = createNameRegistry();
@@ -46,6 +63,7 @@ export function createPlanner({ keepOriginalNames = true } = {}) {
         return {
           path,
           url: file.url,
+          noUrlReason: noUrlReason(file),
           size: file.size ?? 0,
           entry: {
             type: "file",
@@ -75,6 +93,7 @@ export function createPlanner({ keepOriginalNames = true } = {}) {
         return {
           path,
           url: m.url,
+          noUrlReason: noUrlReason(m),
           size: m.size ?? 0,
           entry: {
             type: "productMedia",

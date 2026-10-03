@@ -256,3 +256,52 @@ test("downloader falls back to the proxy on a CORS-style TypeError and sticks to
   });
   await assert.rejects(other("https://example.com/a.png"), TypeError);
 });
+
+test("external videos are skipped, not failed; not-ready files explain why", async () => {
+  const { splitDownloadable } = await import("../app/lib/exporter/plan.js");
+  const files = [
+    {
+      id: "gid://shopify/ExternalVideo/1",
+      kind: "ExternalVideo",
+      url: null,
+      embedUrl: "https://youtu.be/x",
+    },
+    {
+      id: "gid://shopify/MediaImage/2",
+      kind: "MediaImage",
+      url: "https://cdn.shopify.com/a.jpg",
+    },
+    {
+      id: "gid://shopify/MediaImage/3",
+      kind: "MediaImage",
+      url: null,
+      status: "PROCESSING",
+    },
+    {
+      id: "gid://shopify/GenericFile/4",
+      kind: "GenericFile",
+      url: null,
+      status: "READY",
+    },
+  ];
+  const { downloadable, skipped } = splitDownloadable(files);
+  assert.equal(downloadable.length, 3);
+  assert.deepEqual(skipped, [
+    {
+      name: "https://youtu.be/x",
+      reason: "External video: nothing to download",
+    },
+  ]);
+  const items = createPlanner().fileItems(downloadable);
+  assert.match(items[1].noUrlReason, /not ready \(status processing\)/);
+  assert.match(items[2].noUrlReason, /no download URL/);
+  const failed = [];
+  await exportItems({
+    items: items.slice(1),
+    maxPartBytes: 1e9,
+    onPart: async () => {},
+    fetchFn: async () => new Response("x"),
+    onProgress: () => {},
+  }).then((r) => failed.push(...r.failed));
+  assert.match(failed[0].error, /not ready/);
+});
