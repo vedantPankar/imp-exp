@@ -511,13 +511,45 @@ async function resolveResourceId(admin, item) {
   }
 }
 
+// Link types whose target can't be found by handle (e.g. the "Orders" link of the customer
+// account menu). They keep the exported resource ID, which only works on the same store.
+const STORE_SPECIFIC_TYPES = new Set([
+  "CUSTOMER_ACCOUNT_PAGE",
+  "METAOBJECT",
+  "SHOP_POLICY",
+]);
+
+const hasStoreSpecific = (items) =>
+  items.some(
+    (i) => STORE_SPECIFIC_TYPES.has(i.type) || hasStoreSpecific(i.items ?? []),
+  );
+
 // Builds MenuItem inputs recursively; links whose target is missing degrade to plain URL links.
-async function buildMenuItems(admin, items, warnings) {
+// With `dropStoreSpecific`, links that need a store-specific resource are left out.
+async function buildMenuItems(
+  admin,
+  items,
+  warnings,
+  { dropStoreSpecific = false } = {},
+) {
   const out = [];
   for (const item of items) {
     const base = { title: item.title, tags: item.tags ?? [] };
     let node;
-    if (RESOURCE_TYPES.has(item.type) && item.resourceHandle) {
+    if (STORE_SPECIFIC_TYPES.has(item.type)) {
+      if (dropStoreSpecific || !item.sourceResourceId) {
+        warnings.push(
+          `“${item.title}”: ${item.type.toLowerCase().replace(/_/g, " ")} link skipped (it points to a store-specific resource)`,
+        );
+        continue;
+      }
+      node = {
+        ...base,
+        type: item.type,
+        resourceId: item.sourceResourceId,
+        url: item.url ?? undefined,
+      };
+    } else if (RESOURCE_TYPES.has(item.type) && item.resourceHandle) {
       const resourceId = await resolveResourceId(admin, item);
       if (resourceId) {
         node = {
@@ -535,7 +567,9 @@ async function buildMenuItems(admin, items, warnings) {
     } else {
       node = { ...base, type: item.type, url: item.url ?? undefined };
     }
-    const children = await buildMenuItems(admin, item.items ?? [], warnings);
+    const children = await buildMenuItems(admin, item.items ?? [], warnings, {
+      dropStoreSpecific,
+    });
     if (children.length) node.items = children;
     out.push(node);
   }
@@ -551,32 +585,45 @@ export function upsertMenus(admin, menus) {
     );
     const existing = all.menus.nodes.find((n) => n.handle === m.handle);
     const warnings = [];
-    const items = await buildMenuItems(admin, m.items ?? [], warnings);
+    const save = async (items) => {
+      const data = existing
+        ? await adminGraphql(
+            admin,
+            `#graphql
+            mutation UpdateMenu($id: ID!, $title: String!, $items: [MenuItemUpdateInput!]!) {
+              menuUpdate(id: $id, title: $title, items: $items) {
+                menu { id }
+                userErrors { field message }
+              }
+            }`,
+            { id: existing.id, title: m.title, items },
+          )
+        : await adminGraphql(
+            admin,
+            `#graphql
+            mutation CreateMenu($title: String!, $handle: String!, $items: [MenuItemCreateInput!]!) {
+              menuCreate(title: $title, handle: $handle, items: $items) {
+                menu { id }
+                userErrors { field message }
+              }
+            }`,
+            { title: m.title, handle: m.handle, items },
+          );
+      return (data.menuUpdate ?? data.menuCreate).userErrors;
+    };
 
-    const data = existing
-      ? await adminGraphql(
-          admin,
-          `#graphql
-          mutation UpdateMenu($id: ID!, $title: String!, $items: [MenuItemUpdateInput!]!) {
-            menuUpdate(id: $id, title: $title, items: $items) {
-              menu { id }
-              userErrors { field message }
-            }
-          }`,
-          { id: existing.id, title: m.title, items },
-        )
-      : await adminGraphql(
-          admin,
-          `#graphql
-          mutation CreateMenu($title: String!, $handle: String!, $items: [MenuItemCreateInput!]!) {
-            menuCreate(title: $title, handle: $handle, items: $items) {
-              menu { id }
-              userErrors { field message }
-            }
-          }`,
-          { title: m.title, handle: m.handle, items },
-        );
-    const { userErrors } = data.menuUpdate ?? data.menuCreate;
+    let userErrors = await save(
+      await buildMenuItems(admin, m.items ?? [], warnings),
+    );
+    // One unresolvable store-specific link shouldn't lose the whole menu: retry without them.
+    if (userErrors.length && hasStoreSpecific(m.items ?? [])) {
+      warnings.length = 0;
+      userErrors = await save(
+        await buildMenuItems(admin, m.items ?? [], warnings, {
+          dropStoreSpecific: true,
+        }),
+      );
+    }
     if (userErrors.length)
       return { status: "failed", error: errorText(userErrors) };
     return { status: existing ? "updated" : "created", warnings };

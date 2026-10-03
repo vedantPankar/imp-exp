@@ -191,6 +191,8 @@ export function normalizeMenuItem(item) {
     resourceHandle: internal ? (match[3] ?? match[2]) : null,
     resourceBlogHandle:
       internal && match[1] === "blogs" && match[3] ? match[2] : null,
+    // Only meaningful on the same store; used for links with no handle (customer account pages)
+    sourceResourceId: item.resourceId ?? null,
     tags: item.tags ?? [],
     items: (item.items ?? []).map(normalizeMenuItem),
   };

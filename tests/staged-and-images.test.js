@@ -192,3 +192,73 @@ test("articles without an image skip fileCreate entirely", async () => {
     undefined,
   );
 });
+
+import { upsertMenus } from "../app/services/import.server.js";
+
+test("menu with a store-specific link is retried without it and keeps the rest", async () => {
+  const saved = [];
+  let attempt = 0;
+  const reply = (data) => ({ json: async () => ({ data }) });
+  const admin = {
+    graphql: async (query, { variables }) => {
+      if (query.includes("ExistingMenus"))
+        return reply({
+          menus: {
+            nodes: [
+              {
+                id: "gid://shopify/Menu/1",
+                handle: "customer-account-main-menu",
+              },
+            ],
+          },
+        });
+      if (query.includes("UpdateMenu")) {
+        saved.push(variables.items);
+        const failing = attempt++ === 0;
+        return reply({
+          menuUpdate: {
+            menu: { id: "m" },
+            userErrors: failing
+              ? [
+                  {
+                    message:
+                      'Couldn\'t create link "Orders", customer_account_page not found',
+                  },
+                ]
+              : [],
+          },
+        });
+      }
+      throw new Error("unexpected");
+    },
+  };
+  const menu = {
+    handle: "customer-account-main-menu",
+    title: "Customer account menu",
+    items: [
+      {
+        title: "Orders",
+        type: "CUSTOMER_ACCOUNT_PAGE",
+        url: "/account/orders",
+        sourceResourceId: null,
+        tags: [],
+        items: [],
+      },
+      {
+        title: "Help",
+        type: "HTTP",
+        url: "https://example.com/help",
+        tags: [],
+        items: [],
+      },
+    ],
+  };
+  const [result] = await upsertMenus(admin, [menu]);
+  assert.equal(result.status, "updated");
+  assert.equal(result.warnings.length, 1);
+  assert.match(result.warnings[0], /Orders.*skipped/);
+  assert.deepEqual(
+    saved.at(-1).map((i) => i.title),
+    ["Help"],
+  );
+});
