@@ -2,7 +2,7 @@
 
 client_id = "d5b2a8e58d5ce467745738b8515d32f6"
 name = "MobiMigrate"
-application_url = "https://example.com"
+application_url = "https://mobimigrate.mobidrag.com"
 embedded = true
 
 [access_scopes]
@@ -34,7 +34,7 @@ api_version = "2026-07"
   compliance_topics = [ "shop/redact" ]
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth" ]
+redirect_urls = [ "https://mobimigrate.mobidrag.com/api/auth" ]
 
 [build]
 automatically_update_urls_on_dev = true
