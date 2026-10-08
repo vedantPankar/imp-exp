@@ -191,7 +191,7 @@ export async function exportItems({
       emit("finalizing");
       const blob = part.finish({
         ...manifestInfo,
-        app: "imp-exp",
+        app: "MobiMigrate",
         version: 2,
         part: state.part,
         createdAt: new Date().toISOString(),

@@ -1,5 +1,5 @@
 {
-  "name": "imp-exp",
+  "name": "mobimigrate",
   "private": true,
   "scripts": {
     "build": "react-router build",

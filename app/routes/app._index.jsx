@@ -1,10 +1,34 @@
 /* eslint-disable react/prop-types */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useFetcher, useLoaderData, useRevalidator } from "react-router";
+import {
+  Link,
+  useFetcher,
+  useLoaderData,
+  useRevalidator,
+} from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { useExport } from "../lib/exporter/useExport.js";
+import { formatBytes, useMetrics } from "../lib/useMetrics.js";
+import {
+  Banner,
+  CARDS,
+  HelpCard,
+  MetricCard,
+  Progress,
+} from "../components/shared.jsx";
+import {
+  ArrowRightIcon,
+  BoltIcon,
+  CheckIcon,
+  ChevronRightIcon,
+  DownloadIcon,
+  FileIcon,
+  GearIcon,
+  StoreIcon,
+  UploadIcon,
+} from "../components/icons.jsx";
 import {
   getExportSettings,
   getLastRuns,
@@ -29,19 +53,6 @@ export const action = async ({ request }) => {
   return { settings };
 };
 
-const CARDS = [
-  { key: "files", label: "Files", runType: "files" },
-  { key: "articles", label: "Blog posts", runType: "articles" },
-  { key: "blogs", label: "Blogs", runType: "blogs" },
-  { key: "pages", label: "Pages", runType: "pages" },
-  { key: "menus", label: "Menus", runType: "menus" },
-  {
-    key: "productMedia",
-    label: "Products with media",
-    runType: "productMedia",
-  },
-];
-
 const SETTING_TOGGLES = [
   ["includeFiles", "Files"],
   ["includeProductMedia", "Product media"],
@@ -50,126 +61,31 @@ const SETTING_TOGGLES = [
   ["includeMenus", "Menus"],
 ];
 
-function formatBytes(bytes) {
-  if (!bytes) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.min(Math.floor(Math.log10(bytes) / 3), units.length - 1);
-  return `${(bytes / 1000 ** i).toFixed(i ? 1 : 0)} ${units[i]}`;
-}
-
-async function getJson(url) {
-  const response = await fetch(url);
-  const json = await response.json();
-  if (!response.ok) throw new Error(json.error || `HTTP ${response.status}`);
-  return json;
-}
-
-// Files and product media have no aggregate in the API, so we page through them in
-// chunks and update the card as we go. Cancelled via `signal.aborted` on unmount.
-async function scanInChunks(metric, onProgress, signal) {
-  let cursor = null;
-  let count = 0;
-  let bytes = 0;
-  for (;;) {
-    const qs = new URLSearchParams({ metric });
-    if (cursor) qs.set("cursor", cursor);
-    const part = await getJson(`/api/metrics?${qs}`);
-    if (signal.aborted) return;
-    count += part.count;
-    bytes += part.bytes ?? 0;
-    cursor = part.cursor;
-    onProgress({ count, bytes, partial: !part.done });
-    if (part.done) return;
-  }
-}
-
-function useMetrics() {
-  const [metrics, setMetrics] = useState({});
-  useEffect(() => {
-    const controller = new AbortController();
-    const { signal } = controller;
-    const patch = (key, value) =>
-      setMetrics((m) => ({ ...m, [key]: { ...m[key], ...value } }));
-    const failed = (keys) => (error) => {
-      if (!signal.aborted)
-        keys.forEach((k) => patch(k, { error: error.message, partial: false }));
-    };
-
-    getJson("/api/metrics?metric=quick")
-      .then((q) => {
-        if (signal.aborted) return;
-        for (const k of ["articles", "blogs", "pages", "menus"])
-          patch(k, { count: q[k] });
-      })
-      .catch(failed(["articles", "blogs", "pages", "menus"]));
-    scanInChunks("files", (v) => patch("files", v), signal).catch(
-      failed(["files"]),
-    );
-    scanInChunks("productMedia", (v) => patch("productMedia", v), signal).catch(
-      failed(["productMedia"]),
-    );
-    return () => controller.abort();
-  }, []);
-  return metrics;
-}
-
-function MetricCard({ card, metric, lastRun }) {
-  const loading = !metric || (metric.count === undefined && !metric.error);
-  return (
-    <s-box padding="base" borderWidth="base" borderRadius="base">
-      <s-stack gap="small-200">
-        <s-text color="subdued">{card.label}</s-text>
-        {metric?.error ? (
-          <s-text tone="critical">Couldn’t load</s-text>
-        ) : loading ? (
-          <s-spinner accessibilityLabel={`Loading ${card.label}`} size="base" />
-        ) : (
-          <s-heading>
-            {metric.count.toLocaleString()}
-            {metric.partial ? "+" : ""}
-          </s-heading>
-        )}
-        {card.key === "files" && metric?.count !== undefined && (
-          <s-text color="subdued">{formatBytes(metric.bytes)}</s-text>
-        )}
-        <s-text color="subdued">
-          {lastRun
-            ? `Last exported ${new Date(lastRun.lastRunAt).toLocaleString()}`
-            : "Never exported"}
-        </s-text>
-      </s-stack>
-    </s-box>
-  );
-}
-
 function ExportStatus({ exporter }) {
   const { state } = exporter;
   const p = state.progress;
   if (state.status === "idle") return null;
 
   return (
-    <s-stack gap="small-200">
+    <div className="ie-status">
       {state.status === "running" && p?.phase === "listing" && (
-        <s-text>
+        <Banner>
           Reading store content… {p.listed.toLocaleString()} items found
-        </s-text>
+          <Progress />
+        </Banner>
       )}
       {state.status === "running" && p?.total !== undefined && (
-        <>
-          <s-progress
-            accessibilityLabel="Export progress"
-            value={p.total ? Math.round((p.done / p.total) * 100) : 0}
-            max="100"
-          />
-          <s-text>
+        <Banner heading="Exporting…">
+          <Progress value={p.total ? Math.round((p.done / p.total) * 100) : 0} />
+          <div style={{ marginTop: 8 }}>
             {p.done.toLocaleString()} of {p.total.toLocaleString()} items · part{" "}
             {p.part} · {formatBytes(p.bytes)}
             {p.failed ? ` · ${p.failed} failed` : ""}
-          </s-text>
-        </>
+          </div>
+        </Banner>
       )}
       {state.status === "completed" && (
-        <s-banner
+        <Banner
           tone={state.failed.length ? "warning" : "success"}
           heading={
             state.failed.length
@@ -181,47 +97,91 @@ function ExportStatus({ exporter }) {
           {state.parts === 1 ? "part" : "parts"}.
           {state.failed.length > 0 &&
             ` ${state.failed.length} could not be downloaded, so this run was not recorded as a complete export.`}
-        </s-banner>
+        </Banner>
       )}
       {state.status === "empty" && (
-        <s-banner tone="info">
+        <Banner>
           There is nothing to export for the selected content types.
-        </s-banner>
+        </Banner>
       )}
       {state.status === "cancelled" && (
-        <s-banner tone="warning" heading="Export cancelled">
+        <Banner tone="warning" heading="Export cancelled">
           {state.parts
             ? `${state.parts} ZIP part(s) were already downloaded.`
             : "Nothing was downloaded."}
-        </s-banner>
+        </Banner>
       )}
       {state.status === "error" && (
-        <s-banner tone="critical" heading="Export failed">
+        <Banner tone="critical" heading="Export failed">
           {state.error}
-        </s-banner>
+        </Banner>
       )}
       {state.skipped?.length > 0 && (
-        <s-banner tone="info">
+        <Banner>
           {state.skipped.length} external video
           {state.skipped.length === 1 ? "" : "s"} skipped: they are links
           (YouTube/Vimeo), so there is no file to download.
-        </s-banner>
+        </Banner>
       )}
       {state.failed.length > 0 && (
-        <s-stack gap="small-300">
-          <s-text type="strong">Failed items</s-text>
-          <div style={{ maxHeight: "200px", overflowY: "auto" }}>
-            <s-unordered-list>
+        <Banner tone="warning" heading="Failed items">
+          <div className="ie-scroll">
+            <ul>
               {state.failed.map((f) => (
-                <s-list-item key={f.name}>
+                <li key={f.name}>
                   {f.name} — {f.error}
-                </s-list-item>
+                </li>
               ))}
-            </s-unordered-list>
+            </ul>
           </div>
-        </s-stack>
+        </Banner>
       )}
-    </s-stack>
+    </div>
+  );
+}
+
+function HeroArt() {
+  return (
+    <div className="ie-art" aria-hidden="true">
+      <svg className="ie-art-arrow" viewBox="0 0 60 30" fill="none">
+        <path
+          d="M2 26C20 4 42 2 58 10"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeDasharray="4 4"
+        />
+      </svg>
+      <div className="ie-art-card ie-art-a">
+        <h4>Your Shopify Store</h4>
+        <ul>
+          {["Products", "Customers", "Orders", "Pages", "Blogs & more"].map(
+            (t) => (
+              <li key={t}>
+                <CheckIcon /> {t}
+              </li>
+            ),
+          )}
+        </ul>
+      </div>
+      <div className="ie-art-card ie-art-b">
+        <h4>
+          <StoreIcon style={{ width: 22, height: 22 }} /> Migrate to another
+          store
+        </h4>
+        <ul>
+          {[
+            "Keep your data safe",
+            "Easy migration",
+            "No manual work",
+            "Fast and secure",
+          ].map((t) => (
+            <li key={t}>
+              <CheckIcon /> {t}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
   );
 }
 
@@ -265,127 +225,219 @@ export default function Index() {
       { method: "POST" },
     );
 
+  const exportDisabled = !anySelected || exporter.running;
+  const runRows = CARDS.filter((c) => lastRuns[c.runType])
+    .map((c) => ({ card: c, at: new Date(lastRuns[c.runType].lastRunAt) }))
+    .sort((a, b) => b.at - a.at);
+
   return (
-    <s-page heading="Store backup & migration">
-      <s-banner tone="info" heading="Keep this tab open while exporting">
-        Exports are built in your browser. Closing or reloading this tab before
-        an export finishes will cancel it.
-      </s-banner>
+    <div className="ie">
+      <s-page heading="MobiMigrate">
+        <div className="ie-wrap">
+          <section className="ie-hero">
+            <div>
+              <h1>Back up or migrate your Shopify store</h1>
+              <p className="ie-sub">
+                Export your store data as a ZIP file or import it into another
+                store — quickly and securely.
+              </p>
+              <div className="ie-actions">
+                <Link to="/app/import" className="ie-btn ie-btn-primary ie-btn-lg">
+                  <UploadIcon /> Import store <ArrowRightIcon />
+                </Link>
+                {exporter.running ? (
+                  <button
+                    type="button"
+                    className="ie-btn ie-btn-danger ie-btn-lg"
+                    onClick={exporter.cancel}
+                  >
+                    Cancel export
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="ie-btn ie-btn-outline ie-btn-lg"
+                    disabled={exportDisabled}
+                    onClick={exporter.start}
+                  >
+                    <DownloadIcon /> Export store <ChevronRightIcon />
+                  </button>
+                )}
+              </div>
+              {!anySelected && (
+                <p className="ie-sub" style={{ fontSize: 13, marginTop: 12 }}>
+                  Choose at least one content type in Export settings.
+                </p>
+              )}
+            </div>
+            <HeroArt />
+          </section>
 
-      <s-section heading="Your store content">
-        <s-grid
-          gridTemplateColumns="repeat(auto-fit, minmax(180px, 1fr))"
-          gap="base"
-        >
-          {CARDS.map((card) => (
-            <MetricCard
-              key={card.key}
-              card={card}
-              metric={metrics[card.key]}
-              lastRun={lastRuns[card.runType]}
-            />
-          ))}
-        </s-grid>
-      </s-section>
-
-      <s-section heading="Download files">
-        <s-paragraph>
-          Export your store content as ZIP archives you can keep as a backup or
-          import into another store.
-        </s-paragraph>
-        <s-stack gap="base">
-          <s-stack direction="inline" gap="base">
-            <s-button
-              commandFor="export-settings"
-              command="--show"
-              disabled={exporter.running}
-            >
-              Export settings
-            </s-button>
-            {exporter.running ? (
-              <s-button tone="critical" onClick={exporter.cancel}>
-                Cancel export
-              </s-button>
-            ) : (
-              <s-button
-                variant="primary"
-                disabled={!anySelected}
-                onClick={exporter.start}
-              >
-                Download
-              </s-button>
-            )}
-          </s-stack>
-          {!anySelected && (
-            <s-text color="subdued">
-              Choose at least one content type in Export settings.
-            </s-text>
-          )}
+          <Banner heading="Keep this tab open while exporting">
+            Exports are built in your browser. Closing or reloading this tab
+            before an export finishes will cancel it.
+          </Banner>
           <ExportStatus exporter={exporter} />
-        </s-stack>
-      </s-section>
 
-      <s-section heading="Help & FAQ">
-        <s-unordered-list>
-          <s-list-item>
-            <s-link href="https://example.com/faq/export" target="_blank">
-              How does exporting work?
-            </s-link>
-          </s-list-item>
-          <s-list-item>
-            <s-link href="https://example.com/faq/import" target="_blank">
-              How do I import into another store?
-            </s-link>
-          </s-list-item>
-          <s-list-item>
-            <s-link href="mailto:support@example.com">Contact support</s-link>
-          </s-list-item>
-        </s-unordered-list>
-      </s-section>
+          <section className="ie-card ie-metrics">
+            {CARDS.map((card) => (
+              <MetricCard
+                key={card.key}
+                card={card}
+                metric={metrics[card.key]}
+              />
+            ))}
+          </section>
 
-      <s-modal id="export-settings" heading="Export settings" ref={modalRef}>
-        <s-stack gap="base">
-          <s-text type="strong">Include in export</s-text>
-          {SETTING_TOGGLES.map(([key, label]) => (
-            <s-checkbox
-              key={key}
-              label={label}
-              checked={form[key]}
-              onChange={(e) => update(key, e.currentTarget.checked)}
+          <div className="ie-cols">
+            <section className="ie-card">
+              <div className="ie-card-head">
+                <div className="ie-ico">
+                  <FileIcon />
+                </div>
+                <div className="ie-grow">
+                  <h2>Recent exports</h2>
+                  <p className="ie-sub">Last export of each content type</p>
+                </div>
+              </div>
+              <table className="ie-table">
+                <thead>
+                  <tr>
+                    <th>Content</th>
+                    <th>Last exported</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {runRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} style={{ color: "var(--muted)" }}>
+                        Nothing has been exported yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    runRows.map(({ card, at }) => (
+                      <tr key={card.key}>
+                        <td>{card.label}</td>
+                        <td>{at.toLocaleString()}</td>
+                        <td>
+                          <span className="ie-pill">Completed</span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </section>
+
+            <section className="ie-card">
+              <div className="ie-card-head">
+                <div className="ie-ico">
+                  <BoltIcon />
+                </div>
+                <div className="ie-grow">
+                  <h2>Quick actions</h2>
+                  <p className="ie-sub">Common tasks to get started</p>
+                </div>
+              </div>
+              <div className="ie-actions-col">
+                <Link to="/app/import" className="ie-action">
+                  <div className="ie-ico">
+                    <UploadIcon />
+                  </div>
+                  <div className="ie-grow">
+                    <strong>Import store data</strong>
+                    <span className="ie-sub">
+                      Upload a ZIP file from your Shopify store.
+                    </span>
+                  </div>
+                  <ChevronRightIcon />
+                </Link>
+                <button
+                  type="button"
+                  className="ie-action"
+                  disabled={exportDisabled}
+                  onClick={exporter.start}
+                >
+                  <div className="ie-ico">
+                    <DownloadIcon />
+                  </div>
+                  <div className="ie-grow">
+                    <strong>Export store data</strong>
+                    <span className="ie-sub">
+                      Download all your store data as a ZIP file.
+                    </span>
+                  </div>
+                  <ChevronRightIcon />
+                </button>
+                <button
+                  type="button"
+                  className="ie-action"
+                  disabled={exporter.running}
+                  onClick={() => modalRef.current?.showOverlay?.()}
+                >
+                  <div className="ie-ico">
+                    <GearIcon />
+                  </div>
+                  <div className="ie-grow">
+                    <strong>Export settings</strong>
+                    <span className="ie-sub">
+                      Choose what to include and the ZIP part size.
+                    </span>
+                  </div>
+                  <ChevronRightIcon />
+                </button>
+              </div>
+            </section>
+          </div>
+
+          <HelpCard />
+        </div>
+
+        <s-modal id="export-settings" heading="Export settings" ref={modalRef}>
+          <s-stack gap="base">
+            <s-text type="strong">Include in export</s-text>
+            {SETTING_TOGGLES.map(([key, label]) => (
+              <s-checkbox
+                key={key}
+                label={label}
+                checked={form[key]}
+                onChange={(e) => update(key, e.currentTarget.checked)}
+              />
+            ))}
+            <s-number-field
+              label="Maximum ZIP part size (MB)"
+              min="50"
+              max="4000"
+              value={String(form.maxPartSizeMb)}
+              onInput={(e) => update("maxPartSizeMb", e.currentTarget.value)}
             />
-          ))}
-          <s-number-field
-            label="Maximum ZIP part size (MB)"
-            min="50"
-            max="4000"
-            value={String(form.maxPartSizeMb)}
-            onInput={(e) => update("maxPartSizeMb", e.currentTarget.value)}
-          />
-          <s-checkbox
-            label="Keep original file names"
-            checked={form.keepOriginalNames}
-            onChange={(e) =>
-              update("keepOriginalNames", e.currentTarget.checked)
-            }
-          />
-        </s-stack>
-        <s-button
-          slot="primary-action"
-          variant="primary"
-          onClick={save}
-          {...(saving ? { loading: true } : {})}
-        >
-          Save
-        </s-button>
-        <s-button
-          slot="secondary-actions"
-          commandFor="export-settings"
-          command="--hide"
-        >
-          Cancel
-        </s-button>
-      </s-modal>
-    </s-page>
+            <s-checkbox
+              label="Keep original file names"
+              checked={form.keepOriginalNames}
+              onChange={(e) =>
+                update("keepOriginalNames", e.currentTarget.checked)
+              }
+            />
+          </s-stack>
+          <s-button
+            slot="primary-action"
+            variant="primary"
+            onClick={save}
+            {...(saving ? { loading: true } : {})}
+          >
+            Save
+          </s-button>
+          <s-button
+            slot="secondary-actions"
+            commandFor="export-settings"
+            command="--hide"
+          >
+            Cancel
+          </s-button>
+        </s-modal>
+      </s-page>
+    </div>
   );
 }
 

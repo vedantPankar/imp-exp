@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "d5b2a8e58d5ce467745738b8515d32f6"
-name = "imp-exp"
+name = "MobiMigrate"
 application_url = "https://example.com"
 embedded = true
 
@@ -37,5 +37,4 @@ api_version = "2026-07"
 redirect_urls = [ "https://example.com/api/auth" ]
 
 [build]
-include_config_on_deploy = true
 automatically_update_urls_on_dev = true

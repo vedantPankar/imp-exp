@@ -49,7 +49,7 @@ export function createArchiveSet(files) {
       } catch {
         throw new Error("manifest.json is not valid JSON");
       }
-      if (manifest.app !== "imp-exp" || !Array.isArray(manifest.files)) {
+      if (!["MobiMigrate", "imp-exp"].includes(manifest.app) || !Array.isArray(manifest.files)) {
         throw new Error("This ZIP wasn't created by this app");
       }
       return manifest;
