@@ -18,9 +18,9 @@ export default function App() {
   return (
     <div className={styles.index}>
       <div className={styles.content}>
-        <h1 className={styles.heading}>A short heading about [your app]</h1>
+        <h1 className={styles.heading}>MobiMigrate</h1>
         <p className={styles.text}>
-          A tagline about [your app] that describes your value proposition.
+          Move pages, blog posts, menus, files and product media between Shopify stores using a ZIP file.
         </p>
         {showForm && (
           <Form className={styles.form} method="post" action="/auth/login">
@@ -36,16 +36,16 @@ export default function App() {
         )}
         <ul className={styles.list}>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Export</strong>. Download your store&apos;s pages, blog
+            posts, menus, files and product media as a ZIP file.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Import</strong>. Upload that ZIP into another store and
+            choose which content types to bring in.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Large stores</strong>. Big exports are split into several
+            ZIP parts automatically.
           </li>
         </ul>
       </div>
